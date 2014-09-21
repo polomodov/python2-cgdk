@@ -9,18 +9,18 @@ class MyStrategy:
     # Рассчитаны ли базовые параметры
     once_calculated = False
     # Мои сокомандники
-    my_teammates = False
+    my_teammates = {}
     # Команда противника
-    op_teammates = False
+    op_teammates = {}
     # объект противника
     opponent = False
 
     # for condifence interval 95%
-    z_value = 1.96
+    Z_VALUE = 1.96
 
     # упрощенная табличка функции Лапласа
     # для точности в один знак после запятой и только до 2 сигма
-    laplas_function = {0: 0, 0.1: 0.040, 0.2: 0.079, 0.3: 0.117, 0.4: 0.155, 0.5: 0.191,
+    LAPLAS_FUNCTION = {0: 0, 0.1: 0.040, 0.2: 0.079, 0.3: 0.117, 0.4: 0.155, 0.5: 0.191,
                        0.6: 0.225, 0.7: 0.258, 0.8: 0.288, 0.9: 0.315, 1.0: 0.341,
                        1.1: 0.366, 1.2: 0.384, 1.3: 0.403, 1.4: 0.419, 1.5: 0.433,
                        1.6: 0.445, 1.7: 0.455, 1.8: 0.464, 1.9: 0.471, 2: 0.5}
@@ -30,21 +30,23 @@ class MyStrategy:
         if self.once_calculated == True:
             return True
 
-        if(self.opponent == False):
-            self.opponent = self.world.get_opponent_player()
+        self.opponent = self.world.get_opponent_player()
 
-        if(self.my_teammates == False or self.op_teammates == False):
-            for hockeyist in self.world.hockeyists:
-                if(hockeyist.player_id == self.me.player_id):
-                    self.my_teammates[hockeyist.id] = hockeyist
-                else:
-                    self.op_teammates[hockeyist.id] = hockeyist
+        for hockeyist in self.world.hockeyists:
+            if(hockeyist.player_id == self.me.player_id):
+                self.my_teammates[hockeyist.id] = hockeyist
+            else:
+                self.op_teammates[hockeyist.id] = hockeyist
 
+        once_calculated = True
 
     def move(self, me, world, game, move):
         self.me = me
         self.world = world
         self.game = game
+        self.move_object = move
+
+        self.go_to(700, 400, 0, 0)
 
         # рассчитываем параметры раз в игру
         self.calculate_once()
@@ -167,13 +169,13 @@ class MyStrategy:
             return 0
 
         delta = goalkeeper_distance_to_aim - goalie_max_speed*time_to_aim
-        alpha = math.atan(delta/ (2 * distance_to_aim))
-        probability = 2 * self.laplas_function[round(alpha/strike_angle_deviation)]
+        alpha = atan(delta/ (2 * distance_to_aim))
+        probability = 2 * self.LAPLAS_FUNCTION[round(alpha/strike_angle_deviation)]
 
         return probability
 
     def get_distance(self, point1, point2):
-        return math.sqrt(pow(point1[0] - point2[0], 2) + pow(point1[1] - point2[1], 2))
+        return sqrt(pow(point1[0] - point2[0], 2) + pow(point1[1] - point2[1], 2))
 
     def can_do_action(self):
         """
@@ -187,15 +189,73 @@ class MyStrategy:
         else:
             return True
 
-    def go_to(self, destination, speed):
+    def go_to(self, destination_x, destination_y, destination_speed_x, destination_speed_y):
         """
         Метод для перемещения игрока в точку destination с желаемой скоростью в точке назначения speed
         :param destination:
         :param speed:
         :return:
         """
-        if self.can_do_action():
-            return
+
+        # Мое положение
+        x0 = self.me.x
+        y0 = self.me.y
+        vx0 = self.me.speed_x
+        vy0 = self.me.speed_y
+        
+        # параметры угла и угловой скорости
+        angle = self.me.angle
+        angular_speed = self.me.angular_speed
+
+        # Положение, которое хотим получить на выходе
+        x1 = destination_x
+        y1 = destination_y
+        vx1 = destination_speed_x
+        vy1 = destination_speed_y
+
+        # вектор желаемого перемещения
+        sx = x1 - x0
+        sy = y1 - y0
+        # вектор дельты желемой скорости
+        delta_vx = vx1 - vx0
+        delta_vy = vy1 - vy0
+
+        # считаем направление между вектором ожидаемой скорости и вектором ожимаемого перемещения
+        s_length = sqrt(sx**2 + sy**2)
+        delta_v_length = sqrt(delta_vx**2 + delta_vy**2)
+        if(s_length == 0 or delta_v_length == 0):
+            cos_phi = 1
+        else:
+            cos_phi = (sx * delta_vx + sy * delta_vy) / s_length * delta_v_length
+        phi = acos(cos_phi)
+
+        # довольно точно направлены на цель, ускоряемся
+        if abs(phi - angle) < 0.1 and angular_speed < 1:
+            self.move_object.speed_up = 1
+        # направление совпадает, доварачиваем хоккеиста
+        elif (cos_phi > 0):
+            if (phi - angle) > 0:
+                self.move_object.turn = - 1
+            else:
+                self.move_object.turn = 1
+        # направление противоположное
+        else:
+            # если расстояние большое, пробуем разворот по кругу
+            if sx > 200 and sy > 100:
+                if phi - angle > 0.7:
+                    self.move_object.speed_up = 1
+                else:
+                    self.move.turn = 1
+            elif sx > 200 and sy < -100:
+                if phi - angle < -0.7:
+                    self.move_object.speed_up = 1
+                else:
+                    self.move_object.turn = -1
+            # тупо поворачиваемся в нужную сторону
+            else:
+                self.me.get_angle_to(x1, y1)
+
+
         pass
 
     def get_pass_probability(self, hockeyist):
@@ -220,3 +280,16 @@ class MyStrategy:
         :param hockeyist:
         :return:
         """
+
+
+    def get_angle_from_to(self, angle, x0, y0, x1, y1):
+        absolute_angle_to = atan2(y1 - y0, x1 - x0)
+        relative_angle_to = absolute_angle_to - angle
+
+        while relative_angle_to > pi:
+            relative_angle_to -= 2.0 * pi
+
+        while relative_angle_to < -pi:
+            relative_angle_to += 2.0 * pi
+
+        return relative_angle_to
