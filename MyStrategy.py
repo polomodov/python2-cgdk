@@ -31,14 +31,20 @@ class MyStrategy:
             return True
 
         self.opponent = self.world.get_opponent_player()
+        self.my_player = self.world.get_my_player()
+
+        self.my_net = self.my_player.net_front
+        self.opponent_net = self.opponent.net_front
 
         for hockeyist in self.world.hockeyists:
             if(hockeyist.player_id == self.me.player_id):
                 self.my_teammates[hockeyist.id] = hockeyist
+                self.actions[hockeyist.id] = None
             else:
                 self.op_teammates[hockeyist.id] = hockeyist
 
-        once_calculated = True
+        self.calculate_position_values()
+        self.once_calculated = True
 
     def move(self, me, world, game, move):
         self.me = me
@@ -46,18 +52,18 @@ class MyStrategy:
         self.game = game
         self.move_object = move
 
-        self.go_to(700, 400, 0, 0)
+        #self.go_to(self.world.puck.x, self.world.puck.y, 0, 0)
 
         # рассчитываем параметры раз в игру
         self.calculate_once()
 
         # проверим, что у нас есть возможность что-либо сделать
-        if self.can_do_action():
+        if not self.can_do_action():
             return False
 
         if(self.world.puck.owner_player_id == self.me.player_id):
             self.move_with_puck()
-        elif(self.world.puck.owner_player_id == self.opponent.player_id):
+        elif(self.world.puck.owner_player_id == self.opponent.id):
             self.move_without_puck()
         else:
             self.move_free_puck()
@@ -75,6 +81,10 @@ class MyStrategy:
         Стратегия для игры без шайбы
         :return:
         """
+        # один идет атаковать
+        # второй защищается и пытается отобрать шайьу
+        # если есть третий, то он атакует, стоит и ждет паса
+        
         pass
 
     def move_free_puck(self):
@@ -92,36 +102,51 @@ class MyStrategy:
         :return:
         """
         hockeyist = self.world.hockeyists[0]
-        cell_side = hockeyist.radius
-        width = self.world.width
+        cell_side = 10
+        # ширина поля - размер между воротами оппонентов
+        width = abs(self.my_net - self.opponent_net)
+        if(self.my_net < self.opponent_net):
+            my_net = 'left'
+        else:
+            my_net = 'right'
+
         height = self.world.height
-        rows = height / cell_side
-        columns = width / cell_side
+        rows = int(height / cell_side)
+        columns = int(width / cell_side)
         net_width = self.game.goal_net_width
 
-        map = []
+        self.map = [[0 for x in xrange(columns)] for x in xrange(rows)]
         for row_index in range(0, rows):
-            row = []
             for column_index in range(0, columns):
+                if(my_net == 'right' and (column_index < 8 or column_index > 15)):
+                    value = (0, 0)
+                elif(my_net == 'left' and (column_index < columns - 15 or column_index > columns - 8)):
+                    value = (0, 0)
+                elif(row_index > self.game.goal_net_top/cell_side and row_index < (self.game.goal_net_top + self.game.goal_net_width)/cell_side):
+                    value = (0, 0)
+                else:
+                    value_full = self.evaluate_shot_probability(((column_index+0.5)*cell_side, (row_index+0.5)*cell_side), 0, 1, False)
+                    value_fast = self.evaluate_shot_probability(((column_index+0.5)*cell_side, (row_index+0.5)*cell_side), 0, 0.75, False)
+                    value = (value_fast, value_full)
                 # рассчитываем ценность каждой клетки
-                row[column_index] = self.evaluate_shot_probability(((row_index+0.5)*cell_side, (column_index + 0.5)*cell_side))
-            map[row_index] = row
+                self.map[row_index][column_index] = value
 
 
-    def evaluate_shot_probability(self, position, speed=0, strength=1, goalkeeper_fixed=False):
+    def evaluate_shot_probability(self, position, speed=0, strength=1, current_goalkeeper_position=True):
         """
         Метод для оценки вероятности попадания прямого удара
         :return:
         """
-
         # параметры голкипера
         goalie_max_speed = self.game.goalie_max_speed
         goalie_radius = self.world.hockeyists[0].radius
+
         # параметры ворот
         goalie_net_height = self.game.goal_net_height
         goalie_net_top = self.game.goal_net_top
         goalie_net_bottom = goalie_net_top + goalie_net_height
         goalie_net_width = self.game.goal_net_width
+
         # параметры удара
         struck_puck_initial_speed_factor = self.game.struck_puck_initial_speed_factor
         strike_angle_deviation = self.game.strike_angle_deviation
@@ -129,13 +154,13 @@ class MyStrategy:
         # параметры шайбы
         puck_radius = self.world.puck.radius
 
-        # скорость шайьы после удара
+        # скорость шайбы после удара
         speed = struck_puck_initial_speed_factor * strength
 
         # ткущие координаты
         x = position[0]
         y = position[1]
-        if goalkeeper_fixed == False:
+        if current_goalkeeper_position==True:
             # определяем позицию голкипера
             for index in self.op_teammates:
                 op_teammate = self.op_teammates[index]
@@ -153,14 +178,14 @@ class MyStrategy:
         #  и целевую отметку в первом приближении куда стоит пробить (верхнюю или нижнюю штангу)
         # @todo: добавить учет направления текущей скорости голкипера
         if goalkeeper_position > (goalie_net_top + goalie_net_bottom)/2:
-            aim = goalie_net_top - puck_radius
+            aim = goalie_net_top + puck_radius
         else:
             aim = goalie_net_bottom - puck_radius
 
         # дистанция голкипера до приблизительной точки удара
-        goalkeeper_distance_to_aim = abs(goalkeeper_position - aim) - puck_radius
+        goalkeeper_distance_to_aim = abs(goalkeeper_position - aim) - goalie_radius - puck_radius
 
-        distance_to_aim = self.get_distance(position, (goalie_net_width, aim))
+        distance_to_aim = self.get_distance(position, (self.opponent_net, aim))
         time_to_aim = distance_to_aim/speed
 
         # голкипер успеет добраться до точки удара
@@ -169,8 +194,11 @@ class MyStrategy:
             return 0
 
         delta = goalkeeper_distance_to_aim - goalie_max_speed*time_to_aim
-        alpha = atan(delta/ (2 * distance_to_aim))
-        probability = 2 * self.LAPLAS_FUNCTION[round(alpha/strike_angle_deviation)]
+        alpha = atan(delta/(2 * distance_to_aim))
+        value = round(alpha/strike_angle_deviation, 1)
+        if(value > 2):
+            value = 2.0
+        probability = 2 * self.LAPLAS_FUNCTION[value]
 
         return probability
 
@@ -189,7 +217,7 @@ class MyStrategy:
         else:
             return True
 
-    def go_to(self, destination_x, destination_y, destination_speed_x, destination_speed_y):
+    def go_to(self, destination_x, destination_y, destination_speed_x, destination_speed_y, ignore_destination_speed=False):
         """
         Метод для перемещения игрока в точку destination с желаемой скоростью в точке назначения speed
         :param destination:
@@ -202,10 +230,18 @@ class MyStrategy:
         y0 = self.me.y
         vx0 = self.me.speed_x
         vy0 = self.me.speed_y
+
+        # Ускорение хоккеиста
+        a_speed_up = self.game.hockeyist_speed_up_factor
+        a_speed_down = self.game.hockeyist_speed_down_factor
         
         # параметры угла и угловой скорости
-        angle = self.me.angle
+        current_angle = self.me.angle
         angular_speed = self.me.angular_speed
+
+        # параметры скорости
+        max_speed = self.game.hockeyist_max_speed
+        current_speed = sqrt(vx0**2 + vy0**2)
 
         # Положение, которое хотим получить на выходе
         x1 = destination_x
@@ -223,18 +259,43 @@ class MyStrategy:
         # считаем направление между вектором ожидаемой скорости и вектором ожимаемого перемещения
         s_length = sqrt(sx**2 + sy**2)
         delta_v_length = sqrt(delta_vx**2 + delta_vy**2)
-        if(s_length == 0 or delta_v_length == 0):
+
+        # почти стоим на месте или до цели еще далеко
+        if current_speed/max_speed <= 0.2 or s_length > 100:
+            # определяем угол на цель
+            delta_angle = self.me.get_angle_to(x1, y1)
+            # определяем стоит ли доворачиваться или просто можно ускоряться
+            if delta_angle < 0.1:
+                self.move_object.speed_up = 1
+            else:
+                self.move_object.turn = delta_angle
+
+            return False
+
+        # добрались
+        if(s_length < 10):
+            return True
+
+
+        # Теперь учитываем с какой скоростью хотим оказаться в заданной точке
+
+        if(s_length > 0 and delta_v_length == 0):
             cos_phi = 1
         else:
             cos_phi = (sx * delta_vx + sy * delta_vy) / s_length * delta_v_length
+            if(cos_phi > 1):
+                cos_phi = 1
+            elif(cos_phi < -1):
+                cos_phi = -1
+
         phi = acos(cos_phi)
 
         # довольно точно направлены на цель, ускоряемся
-        if abs(phi - angle) < 0.1 and angular_speed < 1:
+        if abs(phi - current_angle) < 0.1 and angular_speed < 1:
             self.move_object.speed_up = 1
         # направление совпадает, доварачиваем хоккеиста
         elif (cos_phi > 0):
-            if (phi - angle) > 0:
+            if (phi - current_angle) > 0:
                 self.move_object.turn = - 1
             else:
                 self.move_object.turn = 1
@@ -242,21 +303,20 @@ class MyStrategy:
         else:
             # если расстояние большое, пробуем разворот по кругу
             if sx > 200 and sy > 100:
-                if phi - angle > 0.7:
+                if phi - current_angle > 0.7:
                     self.move_object.speed_up = 1
                 else:
                     self.move.turn = 1
             elif sx > 200 and sy < -100:
-                if phi - angle < -0.7:
+                if phi - current_angle < -0.7:
                     self.move_object.speed_up = 1
                 else:
                     self.move_object.turn = -1
             # тупо поворачиваемся в нужную сторону
             else:
-                self.me.get_angle_to(x1, y1)
+                angle_to_aim = self.me.get_angle_to(x1, y1)
+                self.move_object.turn = angle_to_aim
 
-
-        pass
 
     def get_pass_probability(self, hockeyist):
         """
