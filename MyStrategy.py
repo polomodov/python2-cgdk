@@ -15,6 +15,7 @@ class MyStrategy:
     # объект противника
     opponent = False
 
+    actions = {}
     # for condifence interval 95%
     Z_VALUE = 1.96
 
@@ -52,7 +53,9 @@ class MyStrategy:
         self.game = game
         self.move_object = move
 
-        #self.go_to(self.world.puck.x, self.world.puck.y, 0, 0)
+        self.just_go_to(self.world.puck.x, self.world.puck.y)
+        #self.just_go_to(300, 300)
+
 
         # рассчитываем параметры раз в игру
         self.calculate_once()
@@ -81,11 +84,65 @@ class MyStrategy:
         Стратегия для игры без шайбы
         :return:
         """
+
+
         # один идет атаковать
         # второй защищается и пытается отобрать шайьу
         # если есть третий, то он атакует, стоит и ждет паса
         
         pass
+
+    def just_go_to(self, destination_x, destination_y):
+        # Мое положение
+        x0 = self.me.x
+        y0 = self.me.y
+        vx0 = self.me.speed_x
+        vy0 = self.me.speed_y
+
+        # Ускорение хоккеиста
+        a_speed_up = self.game.hockeyist_speed_up_factor
+        a_speed_down = self.game.hockeyist_speed_down_factor
+
+        # параметры угла и угловой скорости
+        current_angle = self.me.angle
+        angular_speed = self.me.angular_speed
+
+        # параметры скорости
+        max_speed = self.game.hockeyist_max_speed
+        current_speed = sqrt(vx0**2 + vy0**2)
+
+        # Положение, которое хотим получить на выходе
+        x1 = destination_x
+        y1 = destination_y
+
+        # вектор желаемого перемещения
+        sx = x1 - x0
+        sy = y1 - y0
+
+        s_length = sqrt(sx**2 + sy**2)
+        if(s_length < 2 * self.world.puck.radius):
+            return False
+
+        v_length = sqrt(vx0**2 + vy0**2)
+
+
+        angle_to_aim = self.me.get_angle_to(destination_x, destination_y)
+        # скорость уже мала
+        if(v_length < 2):
+            if angle_to_aim > - pi/10 and angle_to_aim < pi/10:
+                self.move_object.speed_up = 1
+            else:
+                self.move_object.turn = copysign(1, angle_to_aim)
+        else:
+            cos_phi = (sx * vx0 + sy * vy0) / (s_length * v_length)
+            phi = acos(cos_phi)
+
+            if abs(phi) > 3*pi/4:
+                self.move_object.speed_up = -1
+            elif abs(phi) < pi/10:
+                self.move_object.speed_up = 1
+            else:
+                self.move_object.turn = copysign(1, angle_to_aim)
 
     def move_free_puck(self):
         """
@@ -125,8 +182,10 @@ class MyStrategy:
                 elif(row_index > self.game.goal_net_top/cell_side and row_index < (self.game.goal_net_top + self.game.goal_net_width)/cell_side):
                     value = (0, 0)
                 else:
-                    value_full = self.evaluate_shot_probability(((column_index+0.5)*cell_side, (row_index+0.5)*cell_side), 0, 1, False)
-                    value_fast = self.evaluate_shot_probability(((column_index+0.5)*cell_side, (row_index+0.5)*cell_side), 0, 0.75, False)
+                    centr_x = (column_index+0.5)*cell_side
+                    centr_y = (row_index+0.5)*cell_side
+                    value_full = self.evaluate_shot_probability((centr_x, centr_y), 0, 1, False)
+                    value_fast = self.evaluate_shot_probability((centr_x, centr_y), 0, 0.75, False)
                     value = (value_fast, value_full)
                 # рассчитываем ценность каждой клетки
                 self.map[row_index][column_index] = value
